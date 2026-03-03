@@ -1,6 +1,6 @@
 from nash_full_game import solve_full_game
 import numpy as np
-
+import matplotlib.pyplot as plt 
 
 class RandomAgent:
     def __init__(self, M):
@@ -130,28 +130,108 @@ def simulate_full_game(agent1, agent2, agent1_bats_first=True, T=None, max_score
     return winner
 
 
-# ============================================================
-# 5. Monte Carlo Test
-# ============================================================
+def compute_win_rate(T, M, trials=300):
+    max_score = T * M
+    agent_opt = OptimalAgent(T, M, max_score)
+    agent_rand = RandomAgent(M)
 
-if __name__ == "__main__":
-
-    T = 6
-    M = 6
-    max_score = 36
-    trials = 5000
-
-    agent1 = OptimalAgent(T, M, max_score)
-    agent2 = RandomAgent(M)
-
-    wins_agent1 = 0
-
+    wins = 0
     for _ in range(trials):
         winner = simulate_full_game(
-            agent1, agent2, agent1_bats_first=True
+            agent_opt,
+            agent_rand,
+            agent1_bats_first=np.random.rand() < 0.5,
         )
         if winner == 1:
-            wins_agent1 += 1
+            wins += 1
 
-    print("Empirical win rate agent1:", wins_agent1 / trials)
-    print("Theoretical value:", agent1.game_value())
+    return wins / trials
+
+
+def main():
+
+    trials = 300
+
+    # -------------------------------------------------
+    # 1️⃣ Win rate vs Number of Balls (T)
+    # -------------------------------------------------
+
+    M_fixed = 6
+    T_values = list(range(2, 11))
+    win_rates_T = []
+
+    for T in T_values:
+        print(f"Computing win rate for T={T}, M={M_fixed}")
+        win_rates_T.append(compute_win_rate(T, M_fixed, trials))
+
+    plt.figure()
+    plt.plot(T_values, win_rates_T)
+    plt.xlabel("Number of Balls (T)")
+    plt.ylabel("Win Rate vs Random")
+    plt.title("Win Rate vs Number of Balls")
+    plt.show()
+    plt.savefigq("win_rate_vs_T.png")
+
+    # -------------------------------------------------
+    # 2️⃣ Win rate vs Number of Symbols (M)
+    # -------------------------------------------------
+
+    T_fixed = 5
+    M_values = list(range(2, 11))
+    win_rates_M = []
+
+    for M in M_values:
+        print(f"Computing win rate for T={T_fixed}, M={M}")
+        win_rates_M.append(compute_win_rate(T_fixed, M, trials))
+
+    plt.figure()
+    plt.plot(M_values, win_rates_M)
+    plt.xlabel("Number of Symbols (M)")
+    plt.ylabel("Win Rate vs Random")
+    plt.title("Win Rate vs Number of Symbols")
+    plt.show()
+    plt.savefig("win_rate_vs_M.png")
+
+    # -------------------------------------------------
+    # 3️⃣ Theoretical value vs Number of Balls
+    # -------------------------------------------------
+
+    theoretical_values_T = []
+
+    for T in T_values:
+        max_score = T * M_fixed
+        agent_opt = OptimalAgent(T, M_fixed, max_score)
+        theoretical_values_T.append(agent_opt.game_value())
+
+    plt.figure()
+    plt.plot(T_values, theoretical_values_T)
+    plt.xlabel("Number of Balls (T)")
+    plt.ylabel("Theoretical Game Value")
+    plt.title("Theoretical Value vs Number of Balls")
+    plt.show()
+    plt.savefig("theoretical_value_vs_T.png")
+
+    # -------------------------------------------------
+    # 4️⃣ Theoretical value vs Number of Symbols
+    # -------------------------------------------------
+
+    theoretical_values_M = []
+
+    for M in M_values:
+        max_score = T_fixed * M
+        agent_opt = OptimalAgent(T_fixed, M, max_score)
+        theoretical_values_M.append(agent_opt.game_value())
+
+    plt.figure()
+    plt.plot(M_values, theoretical_values_M)
+    plt.xlabel("Number of Symbols (M)")
+    plt.ylabel("Theoretical Game Value")
+    plt.title("Theoretical Value vs Number of Symbols")
+    plt.show()
+    plt.savefig("theoretical_value_vs_M.png")
+
+    print("Analysis complete.")
+
+
+if __name__ == "__main__":
+    main()
