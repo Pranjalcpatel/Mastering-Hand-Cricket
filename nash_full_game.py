@@ -1,14 +1,15 @@
 import numpy as np
 from nash_chase import solve_zero_sum_game
 
-def solve_full_game(T, M, max_score):
+def solve_full_game(T, M, max_score, tie_value=0.5):
     """Solve the full two-innings finite-horizon hand-cricket game.
 
     State conventions:
-    - Second innings V[t][k]: win probability for the chasing batter with
-      t balls left and k runs needed, with k capped in [0, max_score].
-    - First innings W[t][s]: win probability for the first-innings batter with
-      t balls left and current score s, with s capped in [0, max_score].
+    - Second innings V[t][k]: payoff for the chasing batter with t balls left and
+      k runs needed, with k capped in [0, max_score].
+      Win = 1, tie = tie_value, loss = 0.
+    - First innings W[t][s]: payoff for the first-innings batter with t balls left
+      and current score s, with s capped in [0, max_score].
     """
 
     # -------------------------
@@ -16,7 +17,11 @@ def solve_full_game(T, M, max_score):
     # -------------------------
     V = np.zeros((T + 1, max_score + 1))
 
+    # Terminal condition with explicit tie handling:
+    # k == 0 -> chase win, k == 1 -> tie, k >= 2 -> chase loss
     V[0, 0] = 1.0
+    if max_score >= 1:
+        V[0, 1] = tie_value
 
     V_strat = {}
 
@@ -32,7 +37,9 @@ def solve_full_game(T, M, max_score):
             for i in range(M):
                 for j in range(M):
                     if i == j:
-                        A[i, j] = 0
+                        # Wicket ends innings immediately.
+                        # If exactly one run was needed, final scores are tied.
+                        A[i, j] = tie_value if k == 1 else 0.0
                     else:
                         new_k = k - (i + 1)
                         if new_k <= 0:

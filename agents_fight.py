@@ -1,6 +1,8 @@
 from nash_full_game import solve_full_game
 import numpy as np
 import matplotlib.pyplot as plt 
+import csv
+import os
 
 class RandomAgent:
     def __init__(self, M):
@@ -11,14 +13,15 @@ class RandomAgent:
 
 
 class OptimalAgent:
-    def __init__(self, T, M, max_score):
+    def __init__(self, T, M, max_score, tie_value=0.5):
         self.T = T
         self.M = M
         self.max_score = max_score
+        self.tie_value = tie_value
 
         print("Precomputing equilibrium...")
         self.V, self.W, self.V_strat, self.W_strat = solve_full_game(
-            T, M, max_score
+            T, M, max_score, tie_value=tie_value
         )
         print("Done.")
 
@@ -124,18 +127,21 @@ def simulate_full_game(agent1, agent2, agent1_bats_first=True, T=None, max_score
 
     if k <= 0:
         winner = 2 if agent1_bats_first else 1
+    elif k == 1:
+        # Chasing side finished level with first-innings score.
+        winner = 0
     else:
         winner = 1 if agent1_bats_first else 2
 
     return winner
 
 
-def compute_win_rate(T, M, trials=300):
+def compute_win_rate(T, M, trials=300, tie_value=0.5):
     max_score = T * M
-    agent_opt = OptimalAgent(T, M, max_score)
+    agent_opt = OptimalAgent(T, M, max_score, tie_value=tie_value)
     agent_rand = RandomAgent(M)
 
-    wins = 0
+    score = 0.0
     for _ in range(trials):
         winner = simulate_full_game(
             agent_opt,
@@ -143,92 +149,114 @@ def compute_win_rate(T, M, trials=300):
             agent1_bats_first=np.random.rand() < 0.5,
         )
         if winner == 1:
-            wins += 1
+            score += 1.0
+        elif winner == 0:
+            score += tie_value
 
-    return wins / trials
+    return score / trials
 
 
 def main():
 
-    trials = 300
+    trials = 500
+
+    def ensure_csv(path, header):
+        if not os.path.exists(path):
+            with open(path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(header)
+
+    def append_csv(path, row):
+        with open(path, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(row)
+
+    def load_csv_rows(path):
+        if not os.path.exists(path):
+            return []
+        with open(path, "r", newline="") as f:
+            return list(csv.DictReader(f))
 
     # -------------------------------------------------
     # 1️⃣ Win rate vs Number of Balls (T)
     # -------------------------------------------------
 
     M_fixed = 6
-    T_values = list(range(2, 11))
-    win_rates_T = []
+    T_values = list(range(2, 50))
+    csv_t_path = "win_rate_vs_T_results.csv"
+    ensure_csv(csv_t_path, ["T", "M_fixed", "win_rate"])
+
+    win_rate_by_T = {}
+    for row in load_csv_rows(csv_t_path):
+        try:
+            row_t = int(row["T"])
+            row_m = int(row["M_fixed"])
+            row_wr = float(row["win_rate"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if row_m == M_fixed:
+            win_rate_by_T[row_t] = row_wr
 
     for T in T_values:
+        if T in win_rate_by_T:
+            print(f"Using cached win rate for T={T}, M={M_fixed}")
+            continue
         print(f"Computing win rate for T={T}, M={M_fixed}")
-        win_rates_T.append(compute_win_rate(T, M_fixed, trials))
+        win_rate_by_T[T] = compute_win_rate(T, M_fixed, trials)
+        append_csv(csv_t_path, [T, M_fixed, win_rate_by_T[T]])
 
+    plot_T = [T for T in T_values if T in win_rate_by_T]
+    plot_wr_T = [win_rate_by_T[T] for T in plot_T]
     plt.figure()
-    plt.plot(T_values, win_rates_T)
+    plt.plot(plot_T, plot_wr_T)
     plt.xlabel("Number of Balls (T)")
     plt.ylabel("Win Rate vs Random")
     plt.title("Win Rate vs Number of Balls")
     plt.show()
-    plt.savefigq("win_rate_vs_T.png")
+    plt.savefig("win_rate_vs_T.png")
 
     # -------------------------------------------------
     # 2️⃣ Win rate vs Number of Symbols (M)
     # -------------------------------------------------
 
-    T_fixed = 5
+    T_fixed_values = [5, 7, 9]
     M_values = list(range(2, 11))
-    win_rates_M = []
+    csv_m_path = "win_rate_vs_M_results.csv"
+    ensure_csv(csv_m_path, ["T_fixed", "M", "win_rate"])
 
-    for M in M_values:
-        print(f"Computing win rate for T={T_fixed}, M={M}")
-        win_rates_M.append(compute_win_rate(T_fixed, M, trials))
+    win_rates_M_by_T = {T_fixed: {} for T_fixed in T_fixed_values}
+    valid_t_values = set(T_fixed_values)
+
+    for row in load_csv_rows(csv_m_path):
+        try:
+            row_t = int(row["T_fixed"])
+            row_m = int(row["M"])
+            row_wr = float(row["win_rate"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if row_t in valid_t_values:
+            win_rates_M_by_T[row_t][row_m] = row_wr
+
+    for T_fixed in T_fixed_values:
+        for M in M_values:
+            if M in win_rates_M_by_T[T_fixed]:
+                print(f"Using cached win rate for T={T_fixed}, M={M}")
+                continue
+            print(f"Computing win rate for T={T_fixed}, M={M}")
+            win_rates_M_by_T[T_fixed][M] = compute_win_rate(T_fixed, M, trials)
+            append_csv(csv_m_path, [T_fixed, M, win_rates_M_by_T[T_fixed][M]])
 
     plt.figure()
-    plt.plot(M_values, win_rates_M)
+    for T_fixed in T_fixed_values:
+        plot_M = [M for M in M_values if M in win_rates_M_by_T[T_fixed]]
+        plot_wr_M = [win_rates_M_by_T[T_fixed][M] for M in plot_M]
+        plt.plot(plot_M, plot_wr_M, label=f"T={T_fixed}")
     plt.xlabel("Number of Symbols (M)")
     plt.ylabel("Win Rate vs Random")
-    plt.title("Win Rate vs Number of Symbols")
+    plt.title("Win Rate vs Number of Symbols (T fixed at 5, 7, 9)")
+    plt.legend()
     plt.show()
     plt.savefig("win_rate_vs_M.png")
-
-    # -------------------------------------------------
-    # 3️⃣ Theoretical value vs Number of Balls
-    # -------------------------------------------------
-
-    theoretical_values_T = []
-
-    for T in T_values:
-        max_score = T * M_fixed
-        agent_opt = OptimalAgent(T, M_fixed, max_score)
-        theoretical_values_T.append(agent_opt.game_value())
-
-    plt.figure()
-    plt.plot(T_values, theoretical_values_T)
-    plt.xlabel("Number of Balls (T)")
-    plt.ylabel("Theoretical Game Value")
-    plt.title("Theoretical Value vs Number of Balls")
-    plt.show()
-    plt.savefig("theoretical_value_vs_T.png")
-
-    # -------------------------------------------------
-    # 4️⃣ Theoretical value vs Number of Symbols
-    # -------------------------------------------------
-
-    theoretical_values_M = []
-
-    for M in M_values:
-        max_score = T_fixed * M
-        agent_opt = OptimalAgent(T_fixed, M, max_score)
-        theoretical_values_M.append(agent_opt.game_value())
-
-    plt.figure()
-    plt.plot(M_values, theoretical_values_M)
-    plt.xlabel("Number of Symbols (M)")
-    plt.ylabel("Theoretical Game Value")
-    plt.title("Theoretical Value vs Number of Symbols")
-    plt.show()
-    plt.savefig("theoretical_value_vs_M.png")
 
     print("Analysis complete.")
 

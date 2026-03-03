@@ -1,3 +1,5 @@
+from doctest import Example
+
 import numpy as np
 from scipy.optimize import linprog
 
@@ -78,76 +80,84 @@ def solve_zero_sum_game(A):
     return p_opt, q_opt, value
 
 
-# def solve_finite_hand_cricket(T, M, max_score):
-#     """
-#     Solve finite-horizon hand cricket.
+def solve_finite_hand_cricket(T, M, max_score, tie_value=0.5):
+    """
+    Solve finite-horizon hand cricket.
 
-#     Parameters:
-#         T         : number of balls
-#         M         : number of symbols (1..M)
-#         max_score : max possible score difference
+    Parameters:
+        T         : number of balls
+        M         : number of symbols (1..M)
+        max_score : max possible score difference
+        tie_value : payoff to chasing batter in case of tie
 
-#     Returns:
-#         V         : value table V[t][k]
-#         strategies: dict with (t,k) -> (p_opt, q_opt)
-#     """
+    Returns:
+        V         : value table V[t][k]
+        strategies: dict with (t,k) -> (p_opt, q_opt)
+    """
 
-#     # Value function V[t][k]
-#     V = np.zeros((T + 1, max_score + 1))
+    # Value function V[t][k]
+    V = np.zeros((T + 1, max_score + 1))
 
-#     # Terminal condition
-#     for k in range(max_score + 1):
-#         if k <= 0:
-#             V[0][k] = 1
-#         else:
-#             V[0][k] = 0
+    # Terminal condition (explicit tie handling):
+    # k == 0 -> chase win, k == 1 -> tie, k >= 2 -> chase loss
+    for k in range(max_score + 1):
+        if k <= 0:
+            V[0][k] = 1
+        elif k == 1:
+            V[0][k] = tie_value
+        else:
+            V[0][k] = 0
 
-#     strategies = {}
+    strategies = {}
 
-#     for t in range(1, T + 1):
-#         for k in range(max_score + 1):
+    for t in range(1, T + 1):
+        for k in range(max_score + 1):
 
-#             # If already won
-#             if k <= 0:
-#                 V[t][k] = 1
-#                 continue
+            # If already won
+            if k <= 0:
+                V[t][k] = 1
+                continue
 
-#             A = np.zeros((M, M))
+            A = np.zeros((M, M))
 
-#             for i in range(M):        # batter choice
-#                 for j in range(M):    # bowler choice
-#                     if i == j:
-#                         A[i, j] = 0  # out
-#                     else:
-#                         new_k = k - (i + 1)
-#                         if new_k <= 0:
-#                             A[i, j] = 1
-#                         else:
-#                             A[i, j] = V[t - 1][min(new_k, max_score)]
+            for i in range(M):        # batter choice
+                for j in range(M):    # bowler choice
+                    if i == j:
+                        # Wicket ends innings immediately.
+                        # If exactly one run was needed, scores are level (tie).
+                        A[i, j] = tie_value if k == 1 else 0
+                    else:
+                        new_k = k - (i + 1)
+                        if new_k <= 0:
+                            A[i, j] = 1
+                        else:
+                            A[i, j] = V[t - 1][min(new_k, max_score)]
 
-#             p_opt, q_opt, val = solve_zero_sum_game(A)
+            p_opt, q_opt, val = solve_zero_sum_game(A)
 
-#             V[t][k] = val
-#             strategies[(t, k)] = (p_opt, q_opt)
+            V[t][k] = val
+            strategies[(t, k)] = (p_opt, q_opt)
 
-#     return V, strategies
+    return V, strategies
 
 
-# # =============================
-# # Example usage
-# # =============================
+# =============================
+# Example usage
+# =============================
 
-# # T = 5          # balls remaining
-# # M = 6          # symbols
-# # max_score = 30 # max score difference tracked
+T = 12          # balls remaining
+M = 6          # symbols
+max_score = 72 # max score difference tracked
 
-# # V, strategies = solve_finite_hand_cricket(T, M, max_score)
+V, strategies = solve_finite_hand_cricket(T, M, max_score)
 
-# # t = 1
-# # k = 5
+t = 12
+k = 61
 
-# # p_opt, q_opt = strategies[(t, k)]
-
-# # print(f"Game value at (t={t}, k={k}): {V[t][k]:.4f}")
-# # print("Optimal batter strategy:", p_opt)
-# # print("Optimal bowler strategy:", q_opt)
+p_opt, q_opt = strategies[(t, k)]
+p2, q2 = strategies[t-1, max(0, k - 1)]
+print(f"Game value at (t={t}, k={k}): {V[t][k]:.4f}")
+print("Optimal batter strategy:", p_opt)
+print("Optimal bowler strategy:", q_opt)
+print("Next step batter strategy if score reduces by 1:", p2)
+print("Next step bowler strategy if score reduces by 1:", q2)
