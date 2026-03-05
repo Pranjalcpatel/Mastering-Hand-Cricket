@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import csv
 import os
 
+
 class RandomAgent:
     def __init__(self, M):
         self.M = M
@@ -49,6 +50,44 @@ class OptimalAgent:
 
     def game_value(self):
         return self.W[self.T][0]
+    
+class InfiniteOptimalAgent:
+    def __init__(self, M, max_score, tie_value=0.5):
+        self.M = M
+        self.max_score = max_score
+        self.tie_value = tie_value
+
+        print("Solving infinite-balls equilibrium...")
+        self.V, self.W, self.V_strat, self.W_strat = solve_infinite_game(
+            M, max_score, tie_value=tie_value
+        )
+        print("Done.")
+
+    def act(self, role, state):
+
+        state = int(max(0, min(state, self.max_score)))
+
+        if role == "bat_first":
+            p_opt, _ = self.W_strat[state]
+            return np.random.choice(np.arange(1, self.M + 1), p=p_opt)
+
+        elif role == "bowl_first":
+            _, q_opt = self.W_strat[state]
+            return np.random.choice(np.arange(1, self.M + 1), p=q_opt)
+
+        elif role == "bat_second":
+            p_opt, _ = self.V_strat[state]
+            return np.random.choice(np.arange(1, self.M + 1), p=p_opt)
+
+        elif role == "bowl_second":
+            _, q_opt = self.V_strat[state]
+            return np.random.choice(np.arange(1, self.M + 1), p=q_opt)
+
+        else:
+            raise ValueError("Invalid role")
+
+    def game_value(self):
+        return self.W[0]
 
 
 def _resolve_game_param(agent1, agent2, attr_name, explicit_value):
@@ -135,6 +174,55 @@ def simulate_full_game(agent1, agent2, agent1_bats_first=True, T=None, max_score
 
     return winner
 
+def simulate_infinite_game(agent1, agent2, agent1_bats_first=True, max_score=None):
+
+    max_score = _resolve_game_param(agent1, agent2, "max_score", max_score)
+
+    # FIRST INNINGS
+    s = 0
+
+    while True:
+
+        if agent1_bats_first:
+            bat = agent1.act("bat_first", s)
+            bowl = agent2.act("bowl_first", s)
+        else:
+            bat = agent2.act("bat_first", s)
+            bowl = agent1.act("bowl_first", s)
+
+        if bat == bowl:
+            break
+
+        s += bat
+        s = min(s, max_score)
+
+    target = min(s + 1, max_score)
+
+    # SECOND INNINGS
+    k = target
+
+    while k > 0:
+
+        if agent1_bats_first:
+            bat = agent2.act("bat_second", k)
+            bowl = agent1.act("bowl_second", k)
+        else:
+            bat = agent1.act("bat_second", k)
+            bowl = agent2.act("bowl_second", k)
+
+        if bat == bowl:
+            break
+
+        k -= bat
+
+    if k <= 0:
+        winner = 2 if agent1_bats_first else 1
+    elif k == 1:
+        winner = 0
+    else:
+        winner = 1 if agent1_bats_first else 2
+
+    return winner
 
 def compute_win_rate(T, M, trials=300, tie_value=0.5):
     max_score = T * M
@@ -154,6 +242,7 @@ def compute_win_rate(T, M, trials=300, tie_value=0.5):
             score += tie_value
 
     return score / trials
+
 
 
 def main():
