@@ -2,13 +2,13 @@ import argparse
 import sys
 from dataclasses import dataclass
 from typing import List, Tuple
-
+import math
 import numpy as np
-
 from agents_fight import OptimalAgent, RandomAgent
 
 try:
     import pygame
+    import pygame.gfxdraw
 except ImportError as exc:
     raise SystemExit(
         "pygame is required for visualization. Install with: pip install pygame"
@@ -49,22 +49,25 @@ def _infer_param(agent1, agent2, name: str, explicit):
 
 
 def generate_match_events(
-    agent1, agent2, agent1_bats_first: bool, T: int, max_score: int
+    agent1, agent2, agent1_name, agent2_name, agent1_bats_first: bool, T: int, max_score: int
 ) -> Tuple[List[BallEvent], int, int]:
     events: List[BallEvent] = []
-
     t = T
     s = 0
     ball1 = 0
 
+    # Use short names for scoreboard
+    p1_short = agent1_name[:3].upper()
+    p2_short = agent2_name[:3].upper()
+
     while t > 0:
         ball1 += 1
         if agent1_bats_first:
-            striker_name, bowler_name = "Agent 1", "Agent 2"
+            striker_name, bowler_name = p1_short, p2_short
             bat = int(agent1.act("bat_first", t, s))
             bowl = int(agent2.act("bowl_first", t, s))
         else:
-            striker_name, bowler_name = "Agent 2", "Agent 1"
+            striker_name, bowler_name = p2_short, p1_short
             bat = int(agent2.act("bat_first", t, s))
             bowl = int(agent1.act("bowl_first", t, s))
 
@@ -72,31 +75,17 @@ def generate_match_events(
         if not is_out:
             s = min(s + bat, max_score)
             t -= 1
-            msg = f"Runs scored: {bat}"
+            msg = f"+{bat}"
         else:
-            msg = "Wicket! Innings ends."
+            msg = "W"
 
         events.append(
-            BallEvent(
-                innings=1,
-                ball_index=ball1,
-                striker=striker_name,
-                bowler=bowler_name,
-                bat_symbol=bat,
-                bowl_symbol=bowl,
-                is_out=is_out,
-                first_score=s,
-                second_needed=0,
-                balls_left=t,
-                message=msg,
-            )
+            BallEvent(1, ball1, striker_name, bowler_name, bat, bowl, is_out, s, 0, t, msg)
         )
-
         if is_out:
             break
 
     target = min(s + 1, max_score)
-
     t = T
     k = target
     ball2 = 0
@@ -104,11 +93,11 @@ def generate_match_events(
     while t > 0 and k > 0:
         ball2 += 1
         if agent1_bats_first:
-            striker_name, bowler_name = "Agent 2", "Agent 1"
+            striker_name, bowler_name = p2_short, p1_short
             bat = int(agent2.act("bat_second", t, k))
             bowl = int(agent1.act("bowl_second", t, k))
         else:
-            striker_name, bowler_name = "Agent 1", "Agent 2"
+            striker_name, bowler_name = p1_short, p2_short
             bat = int(agent1.act("bat_second", t, k))
             bowl = int(agent2.act("bowl_second", t, k))
 
@@ -116,142 +105,162 @@ def generate_match_events(
         if not is_out:
             k -= bat
             t -= 1
-            msg = f"Chase scores {bat}, needs {max(k, 0)} more."
+            msg = f"+{bat}"
         else:
-            msg = "Wicket! Chase ends."
+            msg = "W"
 
         events.append(
-            BallEvent(
-                innings=2,
-                ball_index=ball2,
-                striker=striker_name,
-                bowler=bowler_name,
-                bat_symbol=bat,
-                bowl_symbol=bowl,
-                is_out=is_out,
-                first_score=s,
-                second_needed=max(k, 0),
-                balls_left=t,
-                message=msg,
-            )
+            BallEvent(2, ball2, striker_name, bowler_name, bat, bowl, is_out, s, max(k, 0), t, msg)
         )
-
         if is_out:
             break
 
     if k <= 0:
-        winner = 2 if agent1_bats_first else 1
+        winner_idx = 2 if agent1_bats_first else 1
     else:
-        winner = 1 if agent1_bats_first else 2
+        winner_idx = 1 if agent1_bats_first else 2
 
-    return events, winner, target
-
-
-def _draw_label(surface, font, text, x, y, color):
-    surface.blit(font.render(text, True, color), (x, y))
+    return events, winner_idx, target
 
 
-def _draw_hand(
-    surface,
-    center_x: int,
-    center_y: int,
-    symbol: int,
-    facing: str,
-    reveal: float,
-    skin=(230, 189, 140),
-    outline=(33, 33, 38),
-):
+def _draw_label(surface, font, text, x, y, color, center=False):
+    rendered = font.render(text, True, color)
+    rect = rendered.get_rect()
+    if center:
+        rect.center = (x, y)
+    else:
+        rect.topleft = (x, y)
+    surface.blit(rendered, rect)
+
+
+def _draw_glow(surface, color, x, y, radius):
+    """Draws a soft glowing orb."""
+    surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+    for r in range(radius, 0, -2):
+        alpha = int(50 * (1 - (r / radius)))
+        pygame.draw.circle(surf, (*color, alpha), (radius, radius), r)
+    surface.blit(surf, (x - radius, y - radius), special_flags=pygame.BLEND_PREMULTIPLIED)
+
+
+def _draw_hand_realistic(surface, cx, cy, symbol, facing, reveal):
+    """Draws a much more natural, shaded vector-style hand."""
     reveal = max(0.0, min(1.0, reveal))
-    facing_sign = -1 if facing == "left" else 1
+    sign = -1 if facing == "left" else 1
 
-    palm_w, palm_h = 120, 90
-    arm_w, arm_h = 100, 42
-    finger_w = 16
-    finger_base_h = 46
-    finger_tip_r = 8
+    # Colors
+    skin_base = (245, 205, 160) # Slightly brighter skin tone
+    skin_shadow = (215, 170, 125)
+    skin_dark = (180, 135, 95)
+    outline = (50, 40, 35)
 
-    # Arm (behind palm)
-    arm_rect = pygame.Rect(0, 0, arm_w, arm_h)
-    arm_rect.center = (center_x - facing_sign * 95, center_y + 20)
-    pygame.draw.rect(surface, skin, arm_rect, border_radius=14)
-    pygame.draw.rect(surface, outline, arm_rect, width=2, border_radius=14)
+    # Shake effect before revealing
+    if reveal < 0.2:
+        shake = math.sin(pygame.time.get_ticks() * 0.05) * 4
+        cx += shake
+        cy += shake
 
-    # Palm
-    palm_rect = pygame.Rect(0, 0, palm_w, palm_h)
-    palm_rect.center = (center_x, center_y)
-    pygame.draw.ellipse(surface, skin, palm_rect)
-    pygame.draw.ellipse(surface, outline, palm_rect, width=3)
+    # Arm
+    pygame.draw.polygon(surface, skin_shadow, [
+        (cx - sign * 80, cy + 30), (cx - sign * 140, cy + 40),
+        (cx - sign * 140, cy - 20), (cx - sign * 80, cy - 10)
+    ])
+    pygame.draw.line(surface, outline, (cx - sign * 80, cy + 30), (cx - sign * 140, cy + 40), 3)
+    pygame.draw.line(surface, outline, (cx - sign * 80, cy - 10), (cx - sign * 140, cy - 20), 3)
+
+    # Palm back
+    palm_rect = pygame.Rect(0, 0, 90, 85)
+    palm_rect.center = (cx, cy + 5)
+    pygame.draw.ellipse(surface, skin_base, palm_rect)
+    
+    # Palm depth/shadow
+    pygame.draw.arc(surface, skin_dark, palm_rect.inflate(4, 4), 
+                    math.radians(180) if sign==1 else 0, 
+                    math.radians(360) if sign==1 else math.radians(180), 4)
+
+    up_count = max(0, min(symbol, 5))
+
+    # Fingers (Thumb, Index, Middle, Ring, Pinky)
+    finger_data = [
+        {"id": "pinky",  "x": -35, "y": -20, "len": 45, "thick": 16},
+        {"id": "ring",   "x": -15, "y": -28, "len": 55, "thick": 18},
+        {"id": "middle", "x": 8,   "y": -32, "len": 60, "thick": 18},
+        {"id": "index",  "x": 30,  "y": -25, "len": 52, "thick": 18},
+    ]
+
+    for i, fd in enumerate(finger_data):
+        is_up = i < up_count
+        # Uncurling animation math
+        curl_factor = 1.0 - reveal if is_up else 1.0
+        
+        fx = cx + fd["x"] * sign
+        fy = cy + fd["y"]
+        
+        # Base joint
+        pygame.draw.circle(surface, skin_shadow, (fx, fy), fd["thick"]//2)
+
+        # Calculate fingertip position based on curl
+        tip_y = fy - (fd["len"] * (1 - curl_factor*0.8))
+        tip_x = fx + (sign * curl_factor * 15) # Fingers curl inward
+
+        # Draw finger segment
+        f_rect = pygame.Rect(0, 0, fd["thick"], abs(fy - tip_y) + fd["thick"])
+        f_rect.midbottom = (fx, fy + fd["thick"]//2)
+        
+        pygame.draw.rect(surface, skin_shadow if curl_factor > 0.5 else skin_base, f_rect, border_radius=fd["thick"]//2)
+        pygame.draw.rect(surface, outline, f_rect, width=2, border_radius=fd["thick"]//2)
+
+        # Knuckle lines
+        if curl_factor < 0.2:
+            pygame.draw.line(surface, skin_dark, (fx - 5, tip_y + 15), (fx + 5, tip_y + 15), 2)
 
     # Thumb
-    thumb_len = int(34 * (0.35 + 0.65 * reveal))
-    thumb_rect = pygame.Rect(0, 0, 16, thumb_len)
-    thumb_rect.center = (
-        center_x + facing_sign * 54,
-        center_y + 10 - thumb_len // 3,
-    )
-    pygame.draw.rect(surface, skin, thumb_rect, border_radius=8)
-    pygame.draw.rect(surface, outline, thumb_rect, width=2, border_radius=8)
-
-    # Finger columns from index->little.
-    finger_offsets = [-34, -18, 0, 18, 34]
-    up_count = max(0, min(symbol, 5))
-    for i, dx in enumerate(finger_offsets):
-        is_up = i < up_count
-        finger_h = int((finger_base_h if is_up else 20) * (0.3 + 0.7 * reveal))
-        finger_rect = pygame.Rect(0, 0, finger_w, finger_h)
-        finger_rect.center = (center_x + dx, center_y - 34 - finger_h // 2)
-        pygame.draw.rect(surface, skin, finger_rect, border_radius=8)
-        pygame.draw.rect(surface, outline, finger_rect, width=2, border_radius=8)
-        pygame.draw.circle(surface, skin, finger_rect.midtop, finger_tip_r)
-        pygame.draw.circle(surface, outline, finger_rect.midtop, finger_tip_r, width=2)
-
-def _draw_pitch(surface, rect, line_color):
-    pygame.draw.rect(surface, (191, 154, 109), rect, border_radius=16)
-    pygame.draw.rect(surface, line_color, rect, width=3, border_radius=16)
-    mid_x = rect.x + rect.width // 2
-    pygame.draw.line(surface, line_color, (mid_x, rect.y + 8), (mid_x, rect.y + rect.height - 8), 3)
-    pygame.draw.line(
-        surface,
-        line_color,
-        (rect.x + 22, rect.y + rect.height // 2),
-        (rect.x + rect.width - 22, rect.y + rect.height // 2),
-        2,
-    )
+    thumb_up = up_count == 5
+    t_curl = 1.0 - reveal if thumb_up else 1.0
+    tx, ty = cx + sign * 40, cy + 10
+    
+    # Thumb angled out
+    t_tip_x = tx + sign * (30 * (1 - t_curl * 0.5))
+    t_tip_y = ty - (25 * (1 - t_curl))
+    
+    pygame.draw.line(surface, skin_base, (tx, ty+10), (t_tip_x, t_tip_y), 20)
+    pygame.draw.line(surface, outline, (tx, ty+10), (t_tip_x, t_tip_y), 24)
+    pygame.draw.line(surface, skin_base, (tx, ty+10), (t_tip_x, t_tip_y), 20) # Redraw inside over outline
+    pygame.draw.circle(surface, skin_base, (t_tip_x, t_tip_y), 10)
+    pygame.draw.circle(surface, outline, (t_tip_x, t_tip_y), 10, 2)
 
 
 def run_pygame_simulation(
-    agent1, agent2, agent1_bats_first=True, T=None, max_score=None, step_delay_ms=900
+    agent1, agent2, agent1_name, agent2_name, agent1_bats_first=True, T=None, max_score=None, step_delay_ms=900
 ):
     T = _infer_param(agent1, agent2, "T", T)
     max_score = _infer_param(agent1, agent2, "max_score", max_score)
 
     pygame.init()
     screen = pygame.display.set_mode((1000, 620))
-    pygame.display.set_caption("Hand Cricket Nash Simulation")
+    pygame.display.set_caption("Hand Cricket Pro")
     clock = pygame.time.Clock()
 
-    bg = (18, 24, 33)
-    panel = (28, 37, 50)
-    panel_2 = (23, 31, 42)
-    text = (235, 239, 244)
-    accent = (72, 187, 120)
-    warning = (245, 101, 101)
-    dim = (161, 177, 196)
-    pitch_line = (54, 66, 84)
+    # Sleek Dark Palette (Updated for brighter text)
+    c_bg = (15, 23, 42)         # Deep slate
+    c_panel = (30, 41, 59)      # Elevated slate
+    c_white = (255, 255, 255)   # Pure white for max contrast
+    c_text = (240, 245, 250)    # Very bright off-white for main text
+    c_sub = (180, 190, 210)     # Brighter gray for secondary text
+    c_accent = (34, 197, 94)    # Vivid Green (Runs)
+    c_danger = (239, 68, 68)    # Neon Red (Out)
+    c_pitch = (71, 85, 105)     # Brighter pitch lines
 
-    title_font = pygame.font.SysFont("consolas", 34, bold=True)
-    h_font = pygame.font.SysFont("consolas", 24, bold=True)
-    body_font = pygame.font.SysFont("consolas", 20)
-    small_font = pygame.font.SysFont("consolas", 17)
-    badge_font = pygame.font.SysFont("consolas", 26, bold=True)
+    font_huge = pygame.font.SysFont("impact, trebuchet ms", 72, bold=True)
+    font_large = pygame.font.SysFont("trebuchet ms", 48, bold=True)
+    font_score = pygame.font.SysFont("trebuchet ms", 36, bold=True)
+    font_body = pygame.font.SysFont("trebuchet ms", 20)
+    font_small = pygame.font.SysFont("trebuchet ms", 16, bold=True)
 
     def setup_new_match():
-        evts, winner, target = generate_match_events(
-            agent1, agent2, agent1_bats_first, T, max_score
-        )
-        return evts, winner, target, 0, True, 0
+        evts, winner_idx, target = generate_match_events(agent1, agent2, agent1_name, agent2_name, agent1_bats_first, T, max_score)
+        return evts, winner_idx, target, 0, True, 0
 
-    events, winner, target, idx, autoplay, last_tick = setup_new_match()
+    events, winner_idx, target, idx, autoplay, last_tick = setup_new_match()
     running = True
 
     while running:
@@ -268,107 +277,100 @@ def run_pygame_simulation(
                     idx = min(idx + 1, len(events))
                     last_tick = now
                 elif event.key == pygame.K_r:
-                    events, winner, target, idx, autoplay, last_tick = setup_new_match()
+                    events, winner_idx, target, idx, autoplay, last_tick = setup_new_match()
 
         if autoplay and idx < len(events) and now - last_tick >= step_delay_ms:
             idx += 1
             last_tick = now
 
-        screen.fill(bg)
-        pygame.draw.rect(screen, panel, (28, 22, 944, 576), border_radius=14)
-        pygame.draw.rect(screen, panel_2, (38, 118, 924, 392), border_radius=12)
-        _draw_pitch(screen, pygame.Rect(270, 196, 460, 232), pitch_line)
-
-        _draw_label(screen, title_font, "Hand Cricket: Two-Innings Simulation", 46, 36, text)
-        _draw_label(
-            screen,
-            small_font,
-            "Controls: Space=Play/Pause  Right=Step  R=Restart  Esc=Quit",
-            48,
-            78,
-            dim,
-        )
+        screen.fill(c_bg)
 
         shown = events[idx - 1] if idx > 0 else None
-        innings = shown.innings if shown is not None else 1
-        first_score = shown.first_score if shown is not None else 0
-        second_needed = shown.second_needed if shown is not None and innings == 2 else target
-        balls_left = shown.balls_left if shown is not None else T
+        
+        # --- SCOREBOARD (Top Bar) ---
+        pygame.draw.rect(screen, c_panel, (0, 0, 1000, 85))
+        pygame.draw.line(screen, c_pitch, (0, 85), (1000, 85), 3)
 
-        _draw_label(screen, h_font, f"Innings: {innings}", 52, 130, text)
-        _draw_label(screen, body_font, f"First-innings score: {first_score}", 52, 168, text)
-        _draw_label(screen, body_font, f"Target: {target}", 52, 202, text)
-        _draw_label(screen, body_font, f"Runs needed (2nd): {max(second_needed, 0)}", 52, 236, text)
-        _draw_label(screen, body_font, f"Balls left: {balls_left}", 52, 270, text)
+        if shown:
+            # Calculate current score based on innings
+            cur_score = shown.first_score if shown.innings == 1 else (target - shown.second_needed)
+            # Adjust score if the ball wasn't a wicket
+            if not shown.is_out and shown.innings == 2:
+                 cur_score = (target - shown.second_needed) + shown.bat_symbol # Re-add current run if not out to show live score
 
-        reveal = 1.0 if idx == 0 else min(1.0, (now - last_tick) / 220.0)
-        left_symbol = shown.bat_symbol if shown is not None else 0
-        right_symbol = shown.bowl_symbol if shown is not None else 0
-        left_role = "Batter"
-        right_role = "Bowler"
-        left_name = shown.striker if shown is not None else "Left Hand"
-        right_name = shown.bowler if shown is not None else "Right Hand"
+            b_left = shown.balls_left
+            
+            _draw_label(screen, font_score, f"{shown.striker} (BAT)", 30, 25, c_text)
+            # Center Score display
+            score_txt = f"{cur_score}"
+            if shown.innings == 2:
+                 score_txt += f" / {target}"
+            _draw_label(screen, font_large, score_txt, 500, 35, c_white, center=True)
 
-        _draw_hand(screen, 380, 312, left_symbol, facing="right", reveal=reveal)
-        _draw_hand(screen, 620, 312, right_symbol, facing="left", reveal=reveal)
-        pygame.draw.circle(screen, (42, 58, 78), (468, 246), 30)
-        pygame.draw.circle(screen, accent, (468, 246), 30, width=3)
-        pygame.draw.circle(screen, (42, 58, 78), (532, 246), 30)
-        pygame.draw.circle(screen, warning, (532, 246), 30, width=3)
-        _draw_label(screen, badge_font, str(left_symbol), 458, 232, text)
-        _draw_label(screen, badge_font, str(right_symbol), 522, 232, text)
-        _draw_label(screen, body_font, f"{left_name} ({left_role})", 290, 430, text)
-        _draw_label(screen, body_font, f"{right_name} ({right_role})", 555, 430, text)
+            _draw_label(screen, font_score, f"{shown.bowler} (BOWL)", 970, 25, c_sub, center=True)
+            
+            status_txt = ""
+            if shown.innings == 2:
+                needed = max(shown.second_needed, 0)
+                status_txt = f"NEED {needed} RUNS OFF {b_left} BALLS"
+            else:
+                status_txt = f"INNINGS 1 | BALLS LEFT: {b_left}"
+            
+            _draw_label(screen, font_body, status_txt, 500, 70, c_accent if shown.innings==2 else c_sub, center=True)
 
-        if shown is None:
-            _draw_label(screen, h_font, "Press Space to start playback.", 52, 328, accent)
-            _draw_label(screen, h_font, "Hands are ready...", 398, 162, dim)
         else:
-            _draw_label(
-                screen,
-                h_font,
-                f"Ball {shown.ball_index} | {shown.striker} batting vs {shown.bowler}",
-                52,
-                328,
-                text,
-            )
-            _draw_label(
-                screen,
-                body_font,
-                shown.message,
-                52,
-                374,
-                warning if shown.is_out else accent,
-            )
-            duel_text = (
-                "OUT!" if shown.is_out else f"{shown.bat_symbol} vs {shown.bowl_symbol}"
-            )
-            duel_color = warning if shown.is_out else accent
-            _draw_label(screen, h_font, duel_text, 462, 162, duel_color)
+            _draw_label(screen, font_score, "MATCH READY - PRESS SPACE", 500, 42, c_white, center=True)
 
-        if idx >= len(events):
-            _draw_label(screen, h_font, f"Match Over | Winner: Agent {winner}", 52, 486, accent)
+        # --- MAIN ARENA ---
+        reveal = 1.0 if idx == 0 else min(1.0, (now - last_tick) / 250.0)
+        sym_l = shown.bat_symbol if shown else 0
+        sym_r = shown.bowl_symbol if shown else 0
 
-        log_x, log_y = 540, 130
-        _draw_label(screen, h_font, "Recent Balls", log_x, log_y, text)
-        recent = events[max(0, idx - 8):idx]
+        # Draw glowing numbers in background
+        if shown and reveal > 0.5:
+            color = c_danger if shown.is_out else c_accent
+            # Glow effect behind the central text
+            _draw_glow(screen, color, 500, 340, 160)
+            # Main outcome text
+            _draw_label(screen, font_huge, shown.message, 500, 340, c_white, center=True)
+
+        _draw_hand_realistic(screen, 300, 370, sym_l, "right", reveal)
+        _draw_hand_realistic(screen, 700, 370, sym_r, "left", reveal)
+
+        # --- TIMELINE (Bottom Bar) ---
+        pygame.draw.rect(screen, c_panel, (20, 530, 960, 70), border_radius=15)
+        
+        recent = events[max(0, idx - 15):idx]
         for i, ev in enumerate(recent):
-            status = "OUT" if ev.is_out else ev.message
-            line = (
-                f"I{ev.innings} B{ev.ball_index}: "
-                f"{ev.striker}({ev.bat_symbol}) vs {ev.bowler}({ev.bowl_symbol}) -> {status}"
-            )
-            _draw_label(screen, small_font, line, log_x, log_y + 34 + i * 26, dim)
+            cx = 60 + i * 60
+            cy = 565
+            col = c_danger if ev.is_out else c_panel
+            # Ensure text on the timeline is bright
+            txt_col = c_white if ev.is_out else c_accent 
+            
+            pygame.draw.circle(screen, col, (cx, cy), 22)
+            pygame.draw.circle(screen, c_pitch, (cx, cy), 22, 2)
+            lbl = "W" if ev.is_out else str(ev.bat_symbol)
+            _draw_label(screen, font_score, lbl, cx, cy, txt_col, center=True)
+            
+            # Innings marker separator
+            if i > 0 and recent[i-1].innings != ev.innings:
+                pygame.draw.line(screen, c_sub, (cx-30, cy-25), (cx-30, cy+25), 3)
 
-        progress = 0.0 if len(events) == 0 else idx / len(events)
-        bar_w = 900
-        pygame.draw.rect(screen, (51, 65, 85), (52, 548, bar_w, 18), border_radius=8)
-        pygame.draw.rect(
-            screen,
-            accent,
-            (52, 548, int(bar_w * progress), 18),
-            border_radius=8,
-        )
+        # --- GAME OVER OVERLAY ---
+        if idx >= len(events):
+            overlay = pygame.Surface((1000, 620), pygame.SRCALPHA)
+            overlay.fill((10, 15, 30, 200)) # Darker, more opaque overlay
+            screen.blit(overlay, (0, 0))
+            
+            winning_name = agent1_name if winner_idx == 1 else agent2_name
+            
+            # Victory message using pure white
+            _draw_label(screen, font_huge, f"{winning_name} WINS!", 500, 300, c_white, center=True)
+            _draw_label(screen, font_score, "Press 'R' to Rematch", 500, 380, c_sub, center=True)
+
+        # Controls hint
+        _draw_label(screen, font_small, "SPACE: Play/Pause | RIGHT: Step | R: Restart | ESC: Quit", 500, 610, c_sub, center=True)
 
         pygame.display.flip()
         clock.tick(60)
@@ -389,37 +391,21 @@ def main():
     parser.add_argument("--T", type=int, default=20, help="Balls per innings.")
     parser.add_argument("--M", type=int, default=6, help="Number symbols (1..M).")
     parser.add_argument("--max-score", type=int, default=120, help="Score cap.")
-    parser.add_argument(
-        "--agent1",
-        choices=["optimal", "random"],
-        default="optimal",
-        help="Agent 1 type.",
-    )
-    parser.add_argument(
-        "--agent2",
-        choices=["optimal", "random"],
-        default="random",
-        help="Agent 2 type.",
-    )
-    parser.add_argument(
-        "--agent1-bats-first",
-        action="store_true",
-        help="Set this flag if Agent 1 bats first.",
-    )
-    parser.add_argument(
-        "--delay-ms",
-        type=int,
-        default=900,
-        help="Delay per ball in autoplay mode.",
-    )
+    parser.add_argument("--agent1", choices=["optimal", "random"], default="optimal", help="Agent 1 type.")
+    parser.add_argument("--agent2", choices=["optimal", "random"], default="random", help="Agent 2 type.")
+    parser.add_argument("--agent1-bats-first", action="store_true", help="Set this flag if Agent 1 bats first.")
+    parser.add_argument("--delay-ms", type=int, default=1000, help="Delay per ball in autoplay mode.")
     args = parser.parse_args()
 
     agent1 = _build_agent(args.agent1, args.T, args.M, args.max_score)
     agent2 = _build_agent(args.agent2, args.T, args.M, args.max_score)
 
+    # Pass uppercase agent names to the simulation
     run_pygame_simulation(
         agent1=agent1,
         agent2=agent2,
+        agent1_name=args.agent1.upper(),
+        agent2_name=args.agent2.upper(),
         agent1_bats_first=args.agent1_bats_first,
         T=args.T,
         max_score=args.max_score,

@@ -1,4 +1,5 @@
 from nash_full_game import solve_full_game
+from nash_infinite_game import solve_infinite_game
 import numpy as np
 import matplotlib.pyplot as plt 
 import csv
@@ -242,113 +243,225 @@ def compute_win_rate(T, M, trials=300, tie_value=0.5):
             score += tie_value
 
     return score / trials
+class PaperInfiniteAgent:
 
+    def __init__(self, M):
+
+        self.M = M
+        self.strategy = self.compute_strategy()
+
+    def compute_strategy(self):
+
+        s = np.arange(1, self.M + 1)
+
+        rho = 1.0
+
+        for _ in range(1000):
+
+            g = np.sum(s / (rho + s)) - 1
+            dg = -np.sum(s / (rho + s) ** 2)
+
+            rho -= g / dg
+
+            if abs(g) < 1e-10:
+                break
+
+        p = 1 / (rho + s)
+        p /= p.sum()
+
+        return p
+
+    def act(self, role, state):
+
+        return np.random.choice(
+            np.arange(1, self.M + 1),
+            p=self.strategy
+        )
 
 
 def main():
+    M = 6
+    max_score = 200
+    trials = 10000
 
-    trials = 500
+    # your infinite equilibrium
+    opt_agent = InfiniteOptimalAgent(M, max_score)
 
-    def ensure_csv(path, header):
-        if not os.path.exists(path):
-            with open(path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(header)
+    # paper approximation
+    paper_agent = PaperInfiniteAgent(M)
 
-    def append_csv(path, row):
-        with open(path, "a", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(row)
+    # random baseline
+    rand_agent = RandomAgent(M)
 
-    def load_csv_rows(path):
-        if not os.path.exists(path):
-            return []
-        with open(path, "r", newline="") as f:
-            return list(csv.DictReader(f))
+    print("\nOptimal strategy:")
+    print(opt_agent.W_strat[0][0])
 
-    # -------------------------------------------------
-    # 1️⃣ Win rate vs Number of Balls (T)
-    # -------------------------------------------------
+    print("\nPaper strategy:")
+    print(paper_agent.strategy)
 
-    M_fixed = 6
-    T_values = list(range(2, 50))
-    csv_t_path = "win_rate_vs_T_results.csv"
-    ensure_csv(csv_t_path, ["T", "M_fixed", "win_rate"])
+    # -----------------------------
+    # Strategy distance
+    # -----------------------------
 
-    win_rate_by_T = {}
-    for row in load_csv_rows(csv_t_path):
-        try:
-            row_t = int(row["T"])
-            row_m = int(row["M_fixed"])
-            row_wr = float(row["win_rate"])
-        except (KeyError, ValueError, TypeError):
-            continue
-        if row_m == M_fixed:
-            win_rate_by_T[row_t] = row_wr
+    p_opt = opt_agent.W_strat[0][0]
+    p_paper = paper_agent.strategy
 
-    for T in T_values:
-        if T in win_rate_by_T:
-            print(f"Using cached win rate for T={T}, M={M_fixed}")
-            continue
-        print(f"Computing win rate for T={T}, M={M_fixed}")
-        win_rate_by_T[T] = compute_win_rate(T, M_fixed, trials)
-        append_csv(csv_t_path, [T, M_fixed, win_rate_by_T[T]])
+    l1 = np.sum(np.abs(p_opt - p_paper))
 
-    plot_T = [T for T in T_values if T in win_rate_by_T]
-    plot_wr_T = [win_rate_by_T[T] for T in plot_T]
-    plt.figure()
-    plt.plot(plot_T, plot_wr_T)
-    plt.xlabel("Number of Balls (T)")
-    plt.ylabel("Win Rate vs Random")
-    plt.title("Win Rate vs Number of Balls")
-    plt.show()
-    plt.savefig("win_rate_vs_T.png")
+    kl = np.sum(p_opt * np.log(p_opt / p_paper))
 
-    # -------------------------------------------------
-    # 2️⃣ Win rate vs Number of Symbols (M)
-    # -------------------------------------------------
+    print("\nStrategy comparison")
+    print("L1 distance:", l1)
+    print("KL divergence:", kl)
 
-    T_fixed_values = [5, 7, 9]
-    M_values = list(range(2, 11))
-    csv_m_path = "win_rate_vs_M_results.csv"
-    ensure_csv(csv_m_path, ["T_fixed", "M", "win_rate"])
+    # -----------------------------
+    # Simulation comparison
+    # -----------------------------
 
-    win_rates_M_by_T = {T_fixed: {} for T_fixed in T_fixed_values}
-    valid_t_values = set(T_fixed_values)
+    def run_match(agentA, agentB):
 
-    for row in load_csv_rows(csv_m_path):
-        try:
-            row_t = int(row["T_fixed"])
-            row_m = int(row["M"])
-            row_wr = float(row["win_rate"])
-        except (KeyError, ValueError, TypeError):
-            continue
-        if row_t in valid_t_values:
-            win_rates_M_by_T[row_t][row_m] = row_wr
+        score = 0
 
-    for T_fixed in T_fixed_values:
-        for M in M_values:
-            if M in win_rates_M_by_T[T_fixed]:
-                print(f"Using cached win rate for T={T_fixed}, M={M}")
-                continue
-            print(f"Computing win rate for T={T_fixed}, M={M}")
-            win_rates_M_by_T[T_fixed][M] = compute_win_rate(T_fixed, M, trials)
-            append_csv(csv_m_path, [T_fixed, M, win_rates_M_by_T[T_fixed][M]])
+        for _ in range(trials):
 
-    plt.figure()
-    for T_fixed in T_fixed_values:
-        plot_M = [M for M in M_values if M in win_rates_M_by_T[T_fixed]]
-        plot_wr_M = [win_rates_M_by_T[T_fixed][M] for M in plot_M]
-        plt.plot(plot_M, plot_wr_M, label=f"T={T_fixed}")
-    plt.xlabel("Number of Symbols (M)")
-    plt.ylabel("Win Rate vs Random")
-    plt.title("Win Rate vs Number of Symbols (T fixed at 5, 7, 9)")
-    plt.legend()
-    plt.show()
-    plt.savefig("win_rate_vs_M.png")
+            winner = simulate_infinite_game(
+                agentA,
+                agentB,
+                agent1_bats_first=np.random.rand() < 0.5
+            )
 
-    print("Analysis complete.")
+            if winner == 1:
+                score += 1
+            elif winner == 0:
+                score += 0.5
+
+        return score / trials
+
+    print("\nWin rates")
+
+    print(
+        "Optimal vs Random:",
+        run_match(opt_agent, rand_agent)
+    )
+
+    print(
+        "Paper vs Random:",
+        run_match(paper_agent, rand_agent)
+    )
+
+    print(
+        "Optimal vs Paper:",
+        run_match(opt_agent, paper_agent)
+    )
 
 
 if __name__ == "__main__":
     main()
+
+# def main():
+
+#     trials = 500
+
+#     def ensure_csv(path, header):
+#         if not os.path.exists(path):
+#             with open(path, "w", newline="") as f:
+#                 writer = csv.writer(f)
+#                 writer.writerow(header)
+
+#     def append_csv(path, row):
+#         with open(path, "a", newline="") as f:
+#             writer = csv.writer(f)
+#             writer.writerow(row)
+
+#     def load_csv_rows(path):
+#         if not os.path.exists(path):
+#             return []
+#         with open(path, "r", newline="") as f:
+#             return list(csv.DictReader(f))
+
+#     # -------------------------------------------------
+#     # 1️⃣ Win rate vs Number of Balls (T)
+#     # -------------------------------------------------
+
+#     M_fixed = 6
+#     T_values = list(range(2, 50))
+#     csv_t_path = "win_rate_vs_T_results.csv"
+#     ensure_csv(csv_t_path, ["T", "M_fixed", "win_rate"])
+
+#     win_rate_by_T = {}
+#     for row in load_csv_rows(csv_t_path):
+#         try:
+#             row_t = int(row["T"])
+#             row_m = int(row["M_fixed"])
+#             row_wr = float(row["win_rate"])
+#         except (KeyError, ValueError, TypeError):
+#             continue
+#         if row_m == M_fixed:
+#             win_rate_by_T[row_t] = row_wr
+
+#     for T in T_values:
+#         if T in win_rate_by_T:
+#             print(f"Using cached win rate for T={T}, M={M_fixed}")
+#             continue
+#         print(f"Computing win rate for T={T}, M={M_fixed}")
+#         win_rate_by_T[T] = compute_win_rate(T, M_fixed, trials)
+#         append_csv(csv_t_path, [T, M_fixed, win_rate_by_T[T]])
+
+#     plot_T = [T for T in T_values if T in win_rate_by_T]
+#     plot_wr_T = [win_rate_by_T[T] for T in plot_T]
+#     plt.figure()
+#     plt.plot(plot_T, plot_wr_T)
+#     plt.xlabel("Number of Balls (T)")
+#     plt.ylabel("Win Rate vs Random")
+#     plt.title("Win Rate vs Number of Balls")
+#     plt.show()
+#     plt.savefig("win_rate_vs_T.png")
+
+#     # -------------------------------------------------
+#     # 2️⃣ Win rate vs Number of Symbols (M)
+#     # -------------------------------------------------
+
+#     T_fixed_values = [5, 7, 9]
+#     M_values = list(range(2, 11))
+#     csv_m_path = "win_rate_vs_M_results.csv"
+#     ensure_csv(csv_m_path, ["T_fixed", "M", "win_rate"])
+
+#     win_rates_M_by_T = {T_fixed: {} for T_fixed in T_fixed_values}
+#     valid_t_values = set(T_fixed_values)
+
+#     for row in load_csv_rows(csv_m_path):
+#         try:
+#             row_t = int(row["T_fixed"])
+#             row_m = int(row["M"])
+#             row_wr = float(row["win_rate"])
+#         except (KeyError, ValueError, TypeError):
+#             continue
+#         if row_t in valid_t_values:
+#             win_rates_M_by_T[row_t][row_m] = row_wr
+
+#     for T_fixed in T_fixed_values:
+#         for M in M_values:
+#             if M in win_rates_M_by_T[T_fixed]:
+#                 print(f"Using cached win rate for T={T_fixed}, M={M}")
+#                 continue
+#             print(f"Computing win rate for T={T_fixed}, M={M}")
+#             win_rates_M_by_T[T_fixed][M] = compute_win_rate(T_fixed, M, trials)
+#             append_csv(csv_m_path, [T_fixed, M, win_rates_M_by_T[T_fixed][M]])
+
+#     plt.figure()
+#     for T_fixed in T_fixed_values:
+#         plot_M = [M for M in M_values if M in win_rates_M_by_T[T_fixed]]
+#         plot_wr_M = [win_rates_M_by_T[T_fixed][M] for M in plot_M]
+#         plt.plot(plot_M, plot_wr_M, label=f"T={T_fixed}")
+#     plt.xlabel("Number of Symbols (M)")
+#     plt.ylabel("Win Rate vs Random")
+#     plt.title("Win Rate vs Number of Symbols (T fixed at 5, 7, 9)")
+#     plt.legend()
+#     plt.show()
+#     plt.savefig("win_rate_vs_M.png")
+
+#     print("Analysis complete.")
+
+
+# if __name__ == "__main__":
+#     main()

@@ -141,23 +141,23 @@ def solve_finite_hand_cricket(T, M, max_score, tie_value=0.5):
     return V, strategies
 
 
-# =============================
-# Example usage
-# =============================
+# # =============================
+# # Example usage
+# # =============================
 
-T = 12          # balls remaining
-M = 6          # symbols
-max_score = 72 # max score difference tracked
+# T = 12          # balls remaining
+# M = 6          # symbols
+# max_score = 72 # max score difference tracked
 
-V, strategies = solve_finite_hand_cricket(T, M, max_score)
+# V, strategies = solve_finite_hand_cricket(T, M, max_score)
 
-t = 12
-k = 61
+# t = 12
+# k = 61
 
-p_opt, q_opt = strategies[(t, k)]
-p2, q2 = strategies[t-1, max(0, k - 1)]
-print(f"Game value at (t={t}, k={k}): {V[t][k]:.4f}")
-print("Optimal batter strategy:", p_opt)
-print("Optimal bowler strategy:", q_opt)
-print("Next step batter strategy if score reduces by 1:", p2)
-print("Next step bowler strategy if score reduces by 1:", q2)
+# p_opt, q_opt = strategies[(t, k)]
+# p2, q2 = strategies[t-1, max(0, k - 1)]
+# print(f"Game value at (t={t}, k={k}): {V[t][k]:.4f}")
+# print("Optimal batter strategy:", p_opt)
+# print("Optimal bowler strategy:", q_opt)
+# print("Next step batter strategy if score reduces by 1:", p2)
+# print("Next step bowler strategy if score reduces by 1:", q2)

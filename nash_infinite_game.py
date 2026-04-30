@@ -2,7 +2,7 @@ import numpy as np
 from nash_chase import solve_zero_sum_game
 
 
-def solve_infinite_game(M, max_score, tie_value=0.5, tol=1e-8, max_iter=10000):
+def solve_infinite_game(M, max_score, tie_value=0.5, tol=1e-8, max_iter=1):
     """
     Solve the infinite-balls two-innings hand-cricket game.
 
@@ -26,6 +26,7 @@ def solve_infinite_game(M, max_score, tie_value=0.5, tol=1e-8, max_iter=10000):
     V_strat = {}
 
     for iteration in range(max_iter):
+        print(f"Iteration {iteration}, V: {V}")
         V_new = V.copy()
 
         for k in range(2, max_score + 1):
