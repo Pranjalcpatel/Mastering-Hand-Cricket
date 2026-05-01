@@ -1,0 +1,3 @@
+decision_index,match_ball_index,innings,innings_ball_index,role,t,state,bucket,blend_weight,chosen_action,opponent_action,pre_observation_count,post_observation_count,nash_p_1,br_p_1,mixed_p_1,nash_p_2,br_p_2,mixed_p_2,nash_p_3,br_p_3,mixed_p_3,nash_p_4,br_p_4,mixed_p_4,l1_from_nash
+1,1,1,1,bowl_first,8,0,early,0.0,4,4,0,1,0.14628831783292168,0.0,0.14628831783292168,0.22499136852334034,0.0,0.22499136852334034,0.288628652271265,0.0,0.288628652271265,0.34009166137247293,1.0,0.34009166137247293,0.0
+2,2,2,1,bat_second,8,1,low,0.0,1,3,0,1,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.25,0.0

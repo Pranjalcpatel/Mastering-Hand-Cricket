@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Tuple
 import math
 import numpy as np
-from agents_fight import OptimalAgent, RandomAgent
+from agents_fight import AdaptiveFiniteAgent, OptimalAgent, RandomAgent
 
 try:
     import pygame
@@ -51,6 +51,11 @@ def _infer_param(agent1, agent2, name: str, explicit):
 def generate_match_events(
     agent1, agent2, agent1_name, agent2_name, agent1_bats_first: bool, T: int, max_score: int
 ) -> Tuple[List[BallEvent], int, int]:
+    if hasattr(agent1, "reset_match"):
+        agent1.reset_match()
+    if hasattr(agent2, "reset_match"):
+        agent2.reset_match()
+
     events: List[BallEvent] = []
     t = T
     s = 0
@@ -62,14 +67,23 @@ def generate_match_events(
 
     while t > 0:
         ball1 += 1
+        state = s
         if agent1_bats_first:
             striker_name, bowler_name = p1_short, p2_short
             bat = int(agent1.act("bat_first", t, s))
             bowl = int(agent2.act("bowl_first", t, s))
+            if hasattr(agent1, "observe"):
+                agent1.observe("bat_first", t, state, bat, bowl)
+            if hasattr(agent2, "observe"):
+                agent2.observe("bowl_first", t, state, bowl, bat)
         else:
             striker_name, bowler_name = p2_short, p1_short
             bat = int(agent2.act("bat_first", t, s))
             bowl = int(agent1.act("bowl_first", t, s))
+            if hasattr(agent2, "observe"):
+                agent2.observe("bat_first", t, state, bat, bowl)
+            if hasattr(agent1, "observe"):
+                agent1.observe("bowl_first", t, state, bowl, bat)
 
         is_out = bat == bowl
         if not is_out:
@@ -92,14 +106,23 @@ def generate_match_events(
 
     while t > 0 and k > 0:
         ball2 += 1
+        state = k
         if agent1_bats_first:
             striker_name, bowler_name = p2_short, p1_short
             bat = int(agent2.act("bat_second", t, k))
             bowl = int(agent1.act("bowl_second", t, k))
+            if hasattr(agent2, "observe"):
+                agent2.observe("bat_second", t, state, bat, bowl)
+            if hasattr(agent1, "observe"):
+                agent1.observe("bowl_second", t, state, bowl, bat)
         else:
             striker_name, bowler_name = p1_short, p2_short
             bat = int(agent1.act("bat_second", t, k))
             bowl = int(agent2.act("bowl_second", t, k))
+            if hasattr(agent1, "observe"):
+                agent1.observe("bat_second", t, state, bat, bowl)
+            if hasattr(agent2, "observe"):
+                agent2.observe("bowl_second", t, state, bowl, bat)
 
         is_out = bat == bowl
         if not is_out:
@@ -381,6 +404,8 @@ def run_pygame_simulation(
 def _build_agent(kind: str, T: int, M: int, max_score: int):
     if kind == "optimal":
         return OptimalAgent(T, M, max_score)
+    if kind == "adaptive":
+        return AdaptiveFiniteAgent(T, M, max_score)
     if kind == "random":
         return RandomAgent(M)
     raise ValueError(f"Unknown agent type: {kind}")
@@ -391,8 +416,8 @@ def main():
     parser.add_argument("--T", type=int, default=20, help="Balls per innings.")
     parser.add_argument("--M", type=int, default=6, help="Number symbols (1..M).")
     parser.add_argument("--max-score", type=int, default=120, help="Score cap.")
-    parser.add_argument("--agent1", choices=["optimal", "random"], default="optimal", help="Agent 1 type.")
-    parser.add_argument("--agent2", choices=["optimal", "random"], default="random", help="Agent 2 type.")
+    parser.add_argument("--agent1", choices=["adaptive", "optimal", "random"], default="optimal", help="Agent 1 type.")
+    parser.add_argument("--agent2", choices=["adaptive", "optimal", "random"], default="random", help="Agent 2 type.")
     parser.add_argument("--agent1-bats-first", action="store_true", help="Set this flag if Agent 1 bats first.")
     parser.add_argument("--delay-ms", type=int, default=1000, help="Delay per ball in autoplay mode.")
     args = parser.parse_args()

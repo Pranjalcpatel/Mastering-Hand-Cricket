@@ -1,0 +1,6 @@
+match_index,seed,adaptive_bats_first,winner_code,nash_winner_code
+1,1501552845,True,2,2
+2,488200390,False,2,2
+3,1380152455,True,1,2
+4,1452245846,True,2,2
+5,1218704077,True,2,2
